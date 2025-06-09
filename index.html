@@ -133,7 +133,9 @@
       }
 
       statusDiv.textContent = "Fetching drafts...";
-      const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/drafts?format=metadata&metadataHeaders=Subject`;
+      // Use fields parameter to get id, internalDate for sorting, and headers for subject
+      // Note: payload.headers will return ALL headers. We'll filter for Subject client-side.
+      const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/drafts?fields=nextPageToken,resultSizeEstimate,drafts(id,message(internalDate,payload/headers))`;
       const headers = { Authorization: `Bearer ${gmailAccessToken}` };
 
       try {
@@ -148,7 +150,16 @@
         }
 
         draftContainer.innerHTML = ''; // Clear loading message
-        if (data.drafts && data.drafts.length > 0) {
+        let draftsToSort = data.drafts || [];
+
+        if (draftsToSort.length > 0) {
+          // Sort drafts by internalDate, newest first
+          draftsToSort.sort((a, b) => {
+            const dateA = parseInt(a.message?.internalDate || "0", 10);
+            const dateB = parseInt(b.message?.internalDate || "0", 10);
+            return dateB - dateA; // Descending order
+          });
+
           console.log(`Found ${data.drafts.length} drafts. Inspecting the first few:`);
           data.drafts.forEach((draftStub, index) => {
             if (index < 3) { // Log details for the first 3 drafts
@@ -160,7 +171,7 @@
             }
 
             const headersArray = draftStub.message?.payload?.headers;
-            // Case-insensitive search for Subject header
+            // Case-insensitive search for Subject header from the fetched headers
             const subjectHeader = headersArray?.find(h => h.name && h.name.toLowerCase() === "subject");
             let subject = (subjectHeader && typeof subjectHeader.value === 'string') ? subjectHeader.value.trim() : null;
             
