@@ -125,16 +125,32 @@
 
       let matchedDraftId = null;
       if (data.drafts && data.drafts.length > 0) {
+        console.log("User input subject (trimmed):", subject);
+        console.log("Total drafts fetched in this batch:", data.drafts.length);
         for (const draftStub of data.drafts) {
           const subjectHeader = draftStub.message?.payload?.headers?.find(h => h.name === "Subject");
-          if (subjectHeader?.value.trim() === subject) {
-            matchedDraftId = draftStub.id;
-            break;
+
+          // Ensure subjectHeader and its value exist and value is a string before trimming and comparing
+          if (subjectHeader && typeof subjectHeader.value === 'string') {
+            const draftApiSubject = subjectHeader.value.trim();
+            console.log(`Comparing API draft subject: "${draftApiSubject}" with input: "${subject}"`);
+            if (draftApiSubject.toLowerCase() === subject.toLowerCase()) {
+              matchedDraftId = draftStub.id;
+              console.log("Match found! Draft ID:", matchedDraftId);
+              break;
+            }
+          } else {
+            console.log("Draft stub ID:", draftStub.id, "does not have a valid 'Subject' header or value. Headers:", draftStub.message?.payload?.headers);
           }
         }
+      } else {
+        console.log("No drafts returned by API in this batch, or data.drafts is empty.");
       }
 
-      if (!matchedDraftId) return statusDiv.textContent = "❌ Draft with that subject not found.";
+      if (!matchedDraftId) {
+        console.log("No match found after iterating through fetched drafts.");
+        return statusDiv.textContent = "❌ Draft with that subject not found.";
+      }
 
       statusDiv.textContent = "Found draft, fetching details…";
 
