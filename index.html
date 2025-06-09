@@ -18,7 +18,12 @@
   <h2>Send Gmail Draft</h2>
   <div id="gSignInDiv"></div>
   <div id="app" style="display:none">
-    <input id="subject" placeholder="Draft Subject">
+    <div>
+      <label for="draftListSelect" style="display: block; margin-bottom: 5px;">Select a Draft:</label>
+      <select id="draftListSelect" style="width: 100%; max-width: 400px; padding: 10px; margin-bottom:10px;" disabled>
+        <option value="">-- Loading drafts --</option>
+      </select>
+    </div>
     <input id="recipient" placeholder="Recipient Email">
     <button id="sendDraftButton" onclick="sendDraft()" disabled>Send Draft</button> <!-- Added ID and disabled by default -->
     <div id="status"></div>
@@ -67,7 +72,8 @@
             gmailAccessToken = tokenResponse.access_token;
             // You could enable UI elements that require the token here
             document.getElementById("status").textContent = "✅ Gmail permissions granted. Ready.";
-            document.getElementById("sendDraftButton").disabled = false;
+            // document.getElementById("sendDraftButton").disabled = false; // Will be enabled once a draft is selected
+            populateDraftList();
             console.log("Gmail API Access Token obtained.");
           } else {
             console.error("Failed to obtain Gmail API access token:", tokenResponse);
@@ -90,7 +96,7 @@
         document.getElementById("app").style.display = "block";
         // After Firebase sign-in, request Gmail API access token
         document.getElementById("status").textContent = "Requesting Gmail permissions...";
-        document.getElementById("sendDraftButton").disabled = true; // Disable button while requesting token
+        document.getElementById("sendDraftButton").disabled = true;
         if (tokenClient) {
           tokenClient.requestAccessToken({ prompt: '' }); // prompt: '' tries to get token without new consent if already granted
         }
@@ -101,65 +107,83 @@
       });
     }
 
+    async function populateDraftList() {
+      const statusDiv = document.getElementById("status");
+      const draftSelect = document.getElementById("draftListSelect");
+      draftSelect.innerHTML = '<option value="">-- Loading drafts --</option>'; // Clear existing and set loading
+      draftSelect.disabled = true;
+      document.getElementById("sendDraftButton").disabled = true;
+
+      if (!gmailAccessToken) {
+        statusDiv.textContent = "❌ Gmail access token not available to fetch drafts.";
+        return;
+      }
+
+      statusDiv.textContent = "Fetching drafts...";
+      const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/drafts?format=metadata&metadataHeaders=Subject`;
+      const headers = { Authorization: `Bearer ${gmailAccessToken}` };
+
+      try {
+        const res = await fetch(listUrl, { headers });
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+          console.error("Error listing drafts:", data.error || res.statusText);
+          statusDiv.textContent = `❌ Error listing drafts: ${data.error?.message || res.statusText}`;
+          draftSelect.innerHTML = '<option value="">-- Error loading drafts --</option>';
+          return;
+        }
+
+        draftSelect.innerHTML = '<option value="">-- Select a Draft --</option>'; // Default option
+        if (data.drafts && data.drafts.length > 0) {
+          data.drafts.forEach(draftStub => {
+            const subjectHeader = draftStub.message?.payload?.headers?.find(h => h.name === "Subject");
+            const subject = (subjectHeader && typeof subjectHeader.value === 'string') ? subjectHeader.value.trim() : " (No Subject)";
+            const option = new Option(`${subject} (ID: ${draftStub.id.slice(0,8)}...)`, draftStub.id);
+            draftSelect.add(option);
+          });
+          draftSelect.disabled = false;
+          statusDiv.textContent = "✅ Drafts loaded. Please select one.";
+        } else {
+          draftSelect.innerHTML = '<option value="">-- No drafts found --</option>';
+          statusDiv.textContent = "ℹ️ No drafts found in your Gmail.";
+        }
+      } catch (error) {
+        console.error("Exception fetching drafts:", error);
+        statusDiv.textContent = "❌ Exception occurred while fetching drafts.";
+        draftSelect.innerHTML = '<option value="">-- Error loading drafts --</option>';
+      }
+    }
+
+    document.getElementById("draftListSelect").addEventListener('change', function() {
+      document.getElementById("sendDraftButton").disabled = !this.value; // Enable button if a draft is selected
+    });
+
     // 📤 Send Email From Draft
     async function sendDraft() {
-      const subject = document.getElementById("subject").value.trim();
+      const selectedDraftElement = document.getElementById("draftListSelect");
+      const matchedDraftId = selectedDraftElement.value;
       const to = document.getElementById("recipient").value.trim();
       const statusDiv = document.getElementById("status"); // Renamed for clarity
 
-      if (!gmailAccessToken) return statusDiv.textContent = "❌ Gmail permissions not granted or token expired. Please re-login or refresh the page.";
-      if (!subject || !to) return statusDiv.textContent = "Please enter both subject and recipient!";
+      if (!matchedDraftId) {
+        return statusDiv.textContent = "⚠️ Please select a draft from the list.";
+      }
+      if (!gmailAccessToken) {
+        return statusDiv.textContent = "❌ Gmail permissions not granted or token expired. Please re-login or refresh the page.";
+      }
+      if (!to) {
+        return statusDiv.textContent = "Please enter the recipient email!";
+      }
+
+      // Get subject from the selected option's text for logging (optional, could also re-fetch)
+      const selectedOptionText = selectedDraftElement.options[selectedDraftElement.selectedIndex].text;
+      const subjectForLogging = selectedOptionText.substring(0, selectedOptionText.lastIndexOf(" (ID:")).trim() || "(No Subject)";
+
       statusDiv.textContent = "Searching for draft…";
 
       const headers = { Authorization: `Bearer ${gmailAccessToken}` };
-
-      // ✅ Step 1: List drafts, requesting only Subject metadata to find the match efficiently
-      const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/drafts?format=metadata&metadataHeaders=Subject`;
-      const res = await fetch(listUrl, { headers });
-      const data = await res.json();
-
-      if (!res.ok || data.error) {
-        console.error("Error listing drafts:", data.error || res.statusText);
-        return statusDiv.textContent = `❌ Error listing drafts: ${data.error?.message || res.statusText}`;
-      }
-
-      let matchedDraftId = null;
-      if (data.drafts && data.drafts.length > 0) {
-        console.log("User input subject (trimmed):", subject);
-        console.log("Total drafts fetched in this batch:", data.drafts.length);
-        for (const draftStub of data.drafts) {
-          // More detailed logging to inspect the draftStub structure
-          console.log("Inspecting draftStub ID:", draftStub.id);
-          console.log("  draftStub.message:", draftStub.message);
-          if (draftStub.message) {
-            console.log("  draftStub.message.payload:", draftStub.message.payload);
-            if (draftStub.message.payload) {
-              console.log("  draftStub.message.payload.headers:", draftStub.message.payload.headers);
-            }
-          }
-
-          const subjectHeader = draftStub.message?.payload?.headers?.find(h => h.name === "Subject");
-
-          if (subjectHeader && typeof subjectHeader.value === 'string') {
-            const draftApiSubject = subjectHeader.value.trim();
-            console.log(`Comparing API draft subject: "${draftApiSubject}" with input: "${subject}"`);
-            if (draftApiSubject.toLowerCase() === subject.toLowerCase()) {
-              matchedDraftId = draftStub.id;
-              console.log("Match found! Draft ID:", matchedDraftId);
-              break;
-            }
-          } else {
-            console.log("Draft stub ID:", draftStub.id, "did not yield a valid 'Subject' header. Full draftStub.message.payload.headers was:", draftStub.message?.payload?.headers);
-          }
-        }
-      } else {
-        console.log("No drafts returned by API in this batch, or data.drafts is empty.");
-      }
-
-      if (!matchedDraftId) {
-        console.log("No match found after iterating through fetched drafts.");
-        return statusDiv.textContent = "❌ Draft with that subject not found.";
-      }
+      // The draft search loop is no longer needed as we have the ID.
 
       statusDiv.textContent = "Found draft, fetching details…";
 
@@ -194,7 +218,7 @@
 
       if (sendRes.ok) {
         statusDiv.textContent = "✅ Email sent!";
-        logSend(subject, to);
+        logSend(subjectForLogging, to);
       } else {
         const sendError = await sendRes.json().catch(() => ({ message: "Unknown send error" }));
         console.error("Failed to send email:", sendError);
