@@ -1,35 +1,192 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Gmail Draft Sender</title>
+  <title>Send Gmail Draft</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-firestore-compat.js"></script>
+  <!-- Removed duplicate Firebase and GSI script includes -->
   <style>
-    body { font-family: sans-serif; max-width: 500px; margin: 40px auto; }
-    input, button { padding: 10px; margin: 10px 0; width: 100%; }
-    #app { display: none; }
+    body { font-family: Arial, sans-serif; padding: 2rem; background: #f4f4f4; }
+    input, button { padding: 10px; margin: 5px; width: 100%; max-width: 400px; }
+    #status { margin-top: 10px; font-weight: bold; }
   </style>
-
-    <script src="https://www.gstatic.com/firebasejs/10.10.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.10.0/firebase-auth.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.10.0/firebase-firestore.js"></script>
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-
 </head>
 <body>
   <h2>Send Gmail Draft</h2>
-
-  <div id="login">
-    <button onclick="loginWithGoogle()">Login with Google</button>
+  <div id="gSignInDiv"></div>
+  <div id="app" style="display:none">
+    <input id="subject" placeholder="Draft Subject">
+    <input id="recipient" placeholder="Recipient Email">
+    <button id="sendDraftButton" onclick="sendDraft()" disabled>Send Draft</button> <!-- Added ID and disabled by default -->
+    <div id="status"></div>
   </div>
 
-  <div id="app">
-    <p>Welcome <span id="userEmail"></span></p>
-    <input type="text" id="subject" placeholder="Enter Draft Subject">
-    <input type="email" id="recipient" placeholder="Recipient Email">
-    <button onclick="sendDraft()">Send</button>
-    <p id="status"></p>
-  </div>
+  <script>
+    // ✅ Replace with your Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyC0hQV7fm1ezqe18h99L7c1b6RVwj44ulE",
+        authDomain: "send-71d82.firebaseapp.com",
+        projectId: "send-71d82",
+        storageBucket: "send-71d82.firebasestorage.app",
+        messagingSenderId: "617445897711",
+        appId: "1:617445897711:web:42995261bbe00cb015721a",
+        measurementId: "G-D4LQGDHBTM"
+    };
 
-  <script src="firebase-init.js"></script>
-  <script src="main.js"></script>
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // ✅ Google Client ID for OAuth and Sign-In Button
+    const CLIENT_ID = "617445897711-7lo4sd93bbfv8e2n0segh63uuv9h4pvl.apps.googleusercontent.com";
+    let gmailAccessToken = null;
+    let tokenClient;
+
+    // Initialize Google Identity Services for the Sign-In button
+    window.onload = () => {
+      google.accounts.id.initialize({
+        client_id: CLIENT_ID,
+        ux_mode: "popup", // Ensures sign-in happens in a popup
+        callback: handleCredentialResponse // Firebase sign-in after Google button auth
+      });
+
+      google.accounts.id.renderButton(
+        document.getElementById("gSignInDiv"), // Corrected ID
+        { theme: "outline", size: "large" }
+      );
+
+      // Initialize the Google OAuth 2.0 token client for Gmail API access
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/gmail.modify', // Sufficient for reading drafts and sending
+        callback: (tokenResponse) => {
+          if (tokenResponse && tokenResponse.access_token) {
+            gmailAccessToken = tokenResponse.access_token;
+            // You could enable UI elements that require the token here
+            document.getElementById("status").textContent = "✅ Gmail permissions granted. Ready.";
+            document.getElementById("sendDraftButton").disabled = false;
+            console.log("Gmail API Access Token obtained.");
+          } else {
+            console.error("Failed to obtain Gmail API access token:", tokenResponse);
+            document.getElementById("status").textContent = "❌ Failed to get Gmail permissions. Please refresh and try signing in again.";
+            document.getElementById("sendDraftButton").disabled = true;
+          }
+        },
+        error_callback: (error) => { // Added error_callback for more detailed diagnostics
+          console.error("Token client error_callback:", error);
+          document.getElementById("status").textContent = `❌ Gmail Permission Error: ${error.type || 'Unknown error'}. Check console.`;
+          document.getElementById("sendDraftButton").disabled = true;
+        },
+      });
+    };
+
+    function handleCredentialResponse(response) {
+      const credential = firebase.auth.GoogleAuthProvider.credential(response.credential);
+      auth.signInWithCredential(credential).then(() => {
+        document.getElementById("gSignInDiv").style.display = "none";
+        document.getElementById("app").style.display = "block";
+        // After Firebase sign-in, request Gmail API access token
+        document.getElementById("status").textContent = "Requesting Gmail permissions...";
+        document.getElementById("sendDraftButton").disabled = true; // Disable button while requesting token
+        if (tokenClient) {
+          tokenClient.requestAccessToken({ prompt: '' }); // prompt: '' tries to get token without new consent if already granted
+        }
+      }).catch(error => {
+        console.error("Firebase sign-in error:", error);
+        document.getElementById("status").textContent = "❌ Firebase sign-in failed.";
+        document.getElementById("sendDraftButton").disabled = true;
+      });
+    }
+
+    // 📤 Send Email From Draft
+    async function sendDraft() {
+      const subject = document.getElementById("subject").value.trim();
+      const to = document.getElementById("recipient").value.trim();
+      const statusDiv = document.getElementById("status"); // Renamed for clarity
+
+      if (!gmailAccessToken) return statusDiv.textContent = "❌ Gmail permissions not granted or token expired. Please re-login or refresh the page.";
+      if (!subject || !to) return statusDiv.textContent = "Please enter both subject and recipient!";
+      statusDiv.textContent = "Searching for draft…";
+
+      const headers = { Authorization: `Bearer ${gmailAccessToken}` };
+
+      // ✅ Step 1: List drafts, requesting only Subject metadata to find the match efficiently
+      const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/drafts?format=metadata&metadataHeaders=Subject`;
+      const res = await fetch(listUrl, { headers });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        console.error("Error listing drafts:", data.error || res.statusText);
+        return statusDiv.textContent = `❌ Error listing drafts: ${data.error?.message || res.statusText}`;
+      }
+
+      let matchedDraftId = null;
+      if (data.drafts && data.drafts.length > 0) {
+        for (const draftStub of data.drafts) {
+          const subjectHeader = draftStub.message?.payload?.headers?.find(h => h.name === "Subject");
+          if (subjectHeader?.value.trim() === subject) {
+            matchedDraftId = draftStub.id;
+            break;
+          }
+        }
+      }
+
+      if (!matchedDraftId) return statusDiv.textContent = "❌ Draft with that subject not found.";
+
+      statusDiv.textContent = "Found draft, fetching details…";
+
+      // ✅ Step 2: Get the full draft details (including raw content) for the matched draft
+      const getDraftUrl = `https://gmail.googleapis.com/gmail/v1/users/me/drafts/${matchedDraftId}`;
+      const draftRes = await fetch(getDraftUrl, { headers });
+      const draftMeta = await draftRes.json();
+
+      if (!draftRes.ok || draftMeta.error) {
+        console.error("Error fetching draft details:", draftMeta.error || draftRes.statusText);
+        return statusDiv.textContent = `❌ Error fetching draft: ${draftMeta.error?.message || draftRes.statusText}`;
+      }
+      if (!draftMeta.message || !draftMeta.message.raw) {
+        return statusDiv.textContent = "❌ Draft content (raw) not found.";
+      }
+
+      // ✅ Step 3: Modify recipient in the raw message
+      const raw = atob(draftMeta.message.raw.replace(/-/g, '+').replace(/_/g, '/'));
+      const modified = raw.replace(/To: .*?\r\n/, `To: ${to}\r\n`);
+      const newRaw = btoa(modified).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+      statusDiv.textContent = "Sending email…";
+      // ✅ Step 4: Send the modified message
+      const sendRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${gmailAccessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ raw: newRaw })
+      });
+
+      if (sendRes.ok) {
+        statusDiv.textContent = "✅ Email sent!";
+        logSend(subject, to);
+      } else {
+        const sendError = await sendRes.json().catch(() => ({ message: "Unknown send error" }));
+        console.error("Failed to send email:", sendError);
+        statusDiv.textContent = `❌ Failed to send: ${sendError.error?.message || sendRes.statusText}`;
+      }
+    }
+
+    // 🧾 Log sent data to Firestore
+    function logSend(subject, to) {
+      const user = auth.currentUser;
+      if (!user) return;
+      db.collection("users").doc(user.uid).collection("sentLogs").add({
+        subject,
+        recipient: to,
+        sentAt: new Date().toISOString()
+      });
+    }
+  </script>
 </body>
 </html>
