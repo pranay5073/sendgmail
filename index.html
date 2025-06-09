@@ -128,9 +128,18 @@
         console.log("User input subject (trimmed):", subject);
         console.log("Total drafts fetched in this batch:", data.drafts.length);
         for (const draftStub of data.drafts) {
+          // More detailed logging to inspect the draftStub structure
+          console.log("Inspecting draftStub ID:", draftStub.id);
+          console.log("  draftStub.message:", draftStub.message);
+          if (draftStub.message) {
+            console.log("  draftStub.message.payload:", draftStub.message.payload);
+            if (draftStub.message.payload) {
+              console.log("  draftStub.message.payload.headers:", draftStub.message.payload.headers);
+            }
+          }
+
           const subjectHeader = draftStub.message?.payload?.headers?.find(h => h.name === "Subject");
 
-          // Ensure subjectHeader and its value exist and value is a string before trimming and comparing
           if (subjectHeader && typeof subjectHeader.value === 'string') {
             const draftApiSubject = subjectHeader.value.trim();
             console.log(`Comparing API draft subject: "${draftApiSubject}" with input: "${subject}"`);
@@ -140,7 +149,7 @@
               break;
             }
           } else {
-            console.log("Draft stub ID:", draftStub.id, "does not have a valid 'Subject' header or value. Headers:", draftStub.message?.payload?.headers);
+            console.log("Draft stub ID:", draftStub.id, "did not yield a valid 'Subject' header. Full draftStub.message.payload.headers was:", draftStub.message?.payload?.headers);
           }
         }
       } else {
