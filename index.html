@@ -149,15 +149,26 @@
 
         draftContainer.innerHTML = ''; // Clear loading message
         if (data.drafts && data.drafts.length > 0) {
-          data.drafts.forEach(draftStub => {
-            const subjectHeader = draftStub.message?.payload?.headers?.find(h => h.name === "Subject");
-            const subject = (subjectHeader && typeof subjectHeader.value === 'string') ? subjectHeader.value.trim() : " (No Subject)";
+          console.log(`Found ${data.drafts.length} drafts. Inspecting the first few:`);
+          data.drafts.forEach((draftStub, index) => {
+            if (index < 3) { // Log details for the first 3 drafts
+              console.log(`Inspecting draftStub ID: ${draftStub.id}`);
+              console.log('  draftStub.message:', JSON.stringify(draftStub.message, null, 2));
+              if (draftStub.message && draftStub.message.payload) {
+                console.log('  draftStub.message.payload.headers:', JSON.stringify(draftStub.message.payload.headers, null, 2));
+              }
+            }
+
+            const headersArray = draftStub.message?.payload?.headers;
+            // Case-insensitive search for Subject header
+            const subjectHeader = headersArray?.find(h => h.name && h.name.toLowerCase() === "subject");
+            let subject = (subjectHeader && typeof subjectHeader.value === 'string') ? subjectHeader.value.trim() : null;
             
             const draftElement = document.createElement('div');
             draftElement.classList.add('draft-item');
-            draftElement.textContent = subject;
+            draftElement.textContent = subject ? subject : `(No Subject) - ID: ${draftStub.id}`;
             draftElement.dataset.draftId = draftStub.id;
-            draftElement.dataset.draftSubject = subject;
+            draftElement.dataset.draftSubject = subject ? subject : "(No Subject)"; // Store for later use
 
             draftElement.addEventListener('click', () => handleDraftSingleClick(draftStub.id, draftElement));
             draftElement.addEventListener('dblclick', () => handleDraftDoubleClick(draftStub.id, subject, draftElement));
@@ -303,6 +314,7 @@
         return statusDiv.textContent = `❌ Error fetching draft: ${draftMeta.error?.message || draftRes.statusText}`;
       }
       if (!draftMeta.message || !draftMeta.message.raw) {
+        console.error("Error: draftMeta.message.raw is missing. Full draftMeta.message:", JSON.stringify(draftMeta.message, null, 2));
         return statusDiv.textContent = "❌ Draft content (raw) not found.";
       }
 
