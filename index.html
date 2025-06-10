@@ -7,6 +7,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.11.1/firebase-firestore-compat.js"></script>
+  <script src="firebase-init.js" defer></script>
   <!-- Removed duplicate Firebase and GSI script includes -->
   <style>
     body { font-family: Arial, sans-serif; padding: 2rem; background: #f4f4f4; }
@@ -39,21 +40,6 @@
   </div>
 
   <script>
-    // ✅ Replace with your Firebase config
-    const firebaseConfig = {
-      apiKey: "AIzaSyC0hQV7fm1ezqe18h99L7c1b6RVwj44ulE",
-        authDomain: "send-71d82.firebaseapp.com",
-        projectId: "send-71d82",
-        storageBucket: "send-71d82.firebasestorage.app",
-        messagingSenderId: "617445897711",
-        appId: "1:617445897711:web:42995261bbe00cb015721a",
-        measurementId: "G-D4LQGDHBTM"
-    };
-
-    firebase.initializeApp(firebaseConfig);
-    const auth = firebase.auth();
-    const db = firebase.firestore();
-
     // ✅ Google Client ID for OAuth and Sign-In Button
     const CLIENT_ID = "617445897711-7lo4sd93bbfv8e2n0segh63uuv9h4pvl.apps.googleusercontent.com";
     let gmailAccessToken = null;
@@ -307,6 +293,7 @@
       if (!to) {
         return statusDiv.textContent = "Please enter the recipient email!";
       }
+      document.getElementById("sendDraftButton").disabled = true;
 
       statusDiv.textContent = "Searching for draft…";
 
@@ -346,9 +333,19 @@
       });
 
       if (sendRes.ok) {
-        statusDiv.textContent = "✅ Email sent!";
         logSend(subjectForLogging, to);
+        selectedDraftForSendingId = null;
+        selectedDraftForSendingSubject = null;
+        // Visually clear selection from the list
+        const selectedItems = document.querySelectorAll('.draft-item.selected-for-sending');
+        selectedItems.forEach(el => el.classList.remove('selected-for-sending'));
+        // Optionally clear the recipient field
+        document.getElementById("recipient").value = "";
+        // Update status to reflect completion and next possible action
+        statusDiv.textContent = "✅ Email sent! Double-click a draft to send another.";
+        // The button remains disabled, which is correct as no draft is selected now.
       } else {
+        document.getElementById("sendDraftButton").disabled = false;
         const sendError = await sendRes.json().catch(() => ({ message: "Unknown send error" }));
         console.error("Failed to send email:", sendError);
         statusDiv.textContent = `❌ Failed to send: ${sendError.error?.message || sendRes.statusText}`;
